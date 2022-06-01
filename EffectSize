@@ -1,0 +1,239 @@
+
+Skip to content
+Pulls
+Issues
+Marketplace
+Explore
+@chacikel
+chacikel /
+SAS_Snippets
+Public
+
+Code
+Issues
+Pull requests
+Actions
+Projects
+Wiki
+Security
+Insights
+
+    Settings
+
+SAS_Snippets/EffectSize
+@chacikel
+chacikel Create EffectSize
+Latest commit 9194f87 3 hours ago
+History
+1 contributor
+210 lines (187 sloc) 8.35 KB
+/*************************************************************************************************
+Program Name    : EffSize.sas
+Purpose         : Calculation effect size parameters (Cohens d, Hedges' g, Hedges'gu) 
+Project         : GitHub Archive
+Programmer      : Cha
+Version/Date    : 1.0 25MAY2022
+SAS Version     : 9.4
+Comments        :
+Modifications   : 
+**************************************************************************************************/
+
+
+/***************************************************************/
+/*  Download rawdata.csv and define a path                     */
+/***************************************************************/
+
+%let path=/MySAS;
+ods rtf file='&path/output.rtf';
+
+proc import file="&path/rawdata.csv"
+    out=input
+    dbms=csv;
+run;
+                                                    
+ Proc Format;
+value Parametr
+0 = "Glass' Delta"                           
+1 = "Cohen's d"                              
+2 = "Point biserial correlation" 
+3 = "Hedges' g "                             
+4 = "Hedges' gu";
+run; 
+
+proc sort data=input;
+by arm;
+run; 
+
+proc means data=input noprint;
+var chg;
+by arm;
+output out=Indata;
+run;
+
+data indata;
+set indata;
+Variable=strip(_stat_)||arm;
+run;
+
+proc transpose data=indata out=datahor;
+var chg;
+id Variable;
+run; 
+
+
+/******************************************************/
+/* INPUT DATA:                                        */
+/*  NTRT:  Sample size of treatment group             */
+/*  NPLC:  Sample size of placebo group               */
+/*  MeanTrt:  Mean of treatment group                 */
+/*  MeanPlc:  Mean of placebo group                   */
+/*  StdTrt:  Standard deviation of treatment group    */
+/*  StdPlc:  Standard deviation of placebo group      */
+/*                                                    */
+/******************************************************/
+
+%macro effsize(datahor,output,cilimit);
+data &output; set &datahor;
+
+   TotSamp = NTRT+NPLC;
+   DegFree = TotSamp-2;
+/***************************************************************/
+/*  Glass's Delta Computation                                  */
+/* According to Hedges LV. Distribution theory for Glass's******/
+/* estimator of effect size and related estimators. journal of */
+/* Educational Statistics. 1981;6(2):107-28*********************/
+/***************************************************************/
+   Delta = (MeanTrt-MeanPlc)/StdPlc;
+   VarDelta = TotSamp/(NTRT*NPLC)+(Delta**2)/(2*NPLC-2);
+   StdDelta = sqrt(VarDelta);
+
+/***************************************************************/
+/*  Cohen's d computation                                      */
+/* According to Cohen J. Statistical power analysis Jbr the    */
+/*behavioral. Sciences Hillsdale (NJ):                         */
+/*Lawrence Erlbaum Associates. 1988:18-74.                     */                            
+/***************************************************************/
+   StdCom = sqrt(((NTRT-1)*(StdTrt**2)+(NPLC-1)*(StdPlc**2))/TotSamp);
+   Cohd = (MeanTrt-MeanPlc)/StdCom;
+   VarCohd = TotSamp/(NTRT*NPLC)+0.5*Cohd**2/DegFree;
+   StdCohd = sqrt(VarCohd);
+
+/*********************************************************/
+/*  Point-Biserial Correlation computation               */
+/* According to  Brown JD. Understanding research in     */ 
+/* second language learning: A teacher's guide to        */
+/* statistics and research design: Cambridge University  */
+/* Press; 1988.                                          */
+/*********************************************************/
+   rPoBi = sqrt((NTRT*NPLC*Cohd**2)/(NTRT*NPLC*Cohd**2+TotSamp**2));
+   zrPoBi = 0.5*log((1+rPoBi)/(1-rPoBi));
+   VazrPoBi = 1 / (TotSamp-3);
+   StzrPoBi = sqrt(VazrPoBi);
+
+/***************************************************************/
+/* Hedges' g computation                                       */
+/* According to Hedges LV, Olkin I. Statistical methods        */
+/* for meta-analysis. Academic Press; 1985.                    */
+/***************************************************************/
+   StdHedg = sqrt(((NTRT-1)*(StdTrt**2)+(NPLC-1)*(StdPlc**2))/DegFree);
+   Hedg = (MeanTrt-MeanPlc)/StdHedg;
+   VarHedg = TotSamp/(NTRT*NPLC)+0.5*Hedg**2/DegFree;
+   StdHedg = sqrt(VarHedg);
+
+/***************************************************************/
+/*  Hedges' gu computation                                     */
+/* According to Hedges LV. Distribution theory for Glass's     */
+/* estimator of effect size and related estimators. journal of */
+/* Educational Statistics. 1981;6(2):107-28                    */
+/***************************************************************/
+   AdjFre=exp(lgamma(0.5*DegFree)-lgamma(0.5*(DegFree-1))
+      -log(sqrt(0.5*DegFree)));
+   Hedgu = Hedg * AdjFre;
+   VarHedgu = TotSamp/(NTRT*NPLC)+0.5*Hedgu**2/TotSamp;
+   StdHedgu = sqrt(VarHedgu);
+
+
+   Parametr = 0;
+   Measure = Delta;
+   std = StdDelta;
+   lower = Delta + probit((1-&cilimit)/2) * StdDelta;
+   upper = Delta - probit((1-&cilimit)/2) * StdDelta;
+   output;
+   Parametr = 1;
+   Measure = Cohd;
+   std = StdCohd;
+   lower = Cohd + probit((1-&cilimit)/2) * StdCohd;
+   upper = Cohd - probit((1-&cilimit)/2) * StdCohd;
+   output;
+   Parametr = 2;
+   Measure = rPoBi;
+   std = StzrPoBi;
+   lower = zrPoBi + probit((1-&cilimit)/2) * StzrPoBi;
+   upper = zrPoBi - probit((1-&cilimit)/2) * StzrPoBi;
+   lower = (exp(2*lower)-1)/(exp(2*lower)+1);
+   upper = (exp(2*upper)-1)/(exp(2*upper)+1);
+   output;
+   Parametr = 3;
+   Measure = Hedg;
+   std = StdHedg;
+   lower = Hedg + probit((1-&cilimit)/2) * StdHedg;
+   upper = Hedg - probit((1-&cilimit)/2) * StdHedg;
+   output;
+   Parametr = 4;
+   Measure = Hedgu;
+   std = StdHedgu;
+   lower = Hedgu + probit((1-&cilimit)/2) * StdHedgu;
+   upper = Hedgu - probit((1-&cilimit)/2) * StdHedgu;
+   output;
+   keep NTRT NPLC MeanTrt MeanPlc StdTrt StdPlc Parametr Measure lower upper;
+   format Parametr;
+%mend effsize;
+run;
+
+/*  If required change your confidence interval*/
+options mprint mlogic;
+%effsize (datahor,output,0.95);
+run;
+
+Data report;
+Set output;
+DesTrt=Put(MeanTrt,6.3)||" ("||Put(StdTrt,6.3)||")";
+DesPlc=Put(MeanPlc,6.3)||" ("||Put(StdPlc,6.3)||")";
+Value=Put(Measure,6.3)||" ("||Put(lower,6.3)||" - "||Put(upper,6.3)||")";
+format Parametr parametr.;
+run;
+
+
+ods rtf file = "&path\report.rtf";
+ods escapechar='^';
+options nodate nonumber orientation=landscape; 
+proc report data=report nowd split='*' missing
+style(report)={just=center rules=none frame=hsides cellspacing=0 cellpadding=0}
+style(lines)=header{background=white asis=on font_size=12pt font_face="TimesRoman"
+font_weight=bold just=left}
+style(header)=header{background=cxD9D9D9 font_size=10pt font_face="TimesRoman" frame=box
+font_weight=bold}
+style(column)=header{background=white font_size=10pt font_face="TimesRoman"
+font_weight=medium};
+columns  NTRT  DesTrt NPlc DesPlc Parametr Value;
+define NTRT / "Number of subjects in treatment group" group order style(column)={just=c};
+define DesTRT / "Mean (Std.Dev) in treatment group" group order style(column)={just=c};
+define NPlc / "Number of subjects in placebo group" group order style(column)={just=c};
+define DesPlc / "Mean (Std.Dev) in placebo group" group order style(column)={just=c};
+define parametr / "Parameters ^{super 1-4}" order order=data width=20 style(column)={just=left};
+define Value / "Effect size estimations" order order=data width=20 style(column)={just=c};
+compute after / style={just=left};
+line "^{super 1}^S={width=100% just=c font_face=TimesRoman fontsize=10pt}Hedges LV. Distribution theory for Glass's estimator of effect size and related estimators. journal of Educational Statistics. 1981;6(2):107-28.";
+line "^{super 2}^S={width=100% just=c font_face=TimesRoman fontsize=10pt}Hedges LV, Olkin I. Statistical methods for meta-analysis. Academic Press; 1985.";
+line "^{super 3}^S={width=100% just=c font_face=TimesRoman fontsize=10pt}Cohen J. Statistical power analysis Jbr the behavioral. Sciences Hillsdale (NJ): Lawrence Erlbaum Associates. 1988:18-74.";
+line "^{super 4}^S={width=100% just=c font_face=TimesRoman fontsize=10pt}Brown JD. Understanding research in second language learning: A teacher's guide to statistics and research design: Cambridge University Press; 1988.";
+endcomp;
+title1 j=c "Descriptive statistics and effect size estimations";
+title2 j=c "Table 1: Summary table";
+title3;
+title4;
+footnote j=l "Table run:  "&sysdate9 &systime"" j=c "Page ^{thispage} of ^{lastpage}" j=r "SAS templates"; 
+footnote4 j=l "Output: &path\report.rtf";
+footnote5 j=l ;
+run;
+ods rtf close;
